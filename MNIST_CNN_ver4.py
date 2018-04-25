@@ -8,9 +8,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
-from torch.autograd import Variable
+from torch.autograd import Variable, Function
 from modules.data import get_mnist
-from modules.module import LRP
+from modules.module import GuidedBackpropRelu, GuidedReluModel
+from modules.linearlrp import linearlrp
+
 from modules.save_model import save_model
 
 from collections import OrderedDict
@@ -22,7 +24,7 @@ def main():
                         help='input batch size for training (default: 64)')
     parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
                         help='input batch size for testing (default: 1000)')
-    parser.add_argument('--epochs', type=int, default=1, metavar='N',
+    parser.add_argument('--epochs', type=int, default=10, metavar='N',
                         help='number of epochs to train (default: 10)')
     parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
                         help='learning rate (default: 0.01)')
@@ -38,7 +40,9 @@ def main():
                         help='relevance methods: simple/eps/w^2/alphabeta')
     parser.add_argument('--save-dir', type=str, default='model', metavar='N',
                         help='saved directory')
-    parser.add_argument('--reload-model', type=bool, default=True, metavar='N',
+    parser.add_argument('--save-model', type=bool, default=True, metavar='N',
+                        help='Save the trained model')
+    parser.add_argument('--reload-model', type=bool, default=False, metavar='N',
                         help='Restore the trained model')
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -49,7 +53,7 @@ def main():
 
     kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
     # MNIST Dataset
-    #Data Acquisition
+    # Data Acquisition
     train_dataset, test_dataset = get_mnist()
 
     # Data Loader (Input Pipeline)
@@ -74,51 +78,69 @@ def main():
         # print('input size:', input[0].size())
         # print('output size:', output.data.size())
         # print('output norm:', output.data.norm())
-
+        self.input = input[0]
         self.output = output.data
 
+    class MyFunction(Function):
+
+        @staticmethod
+        def forward(ctx, input):
+            ctx.save_for_backward(input)
+            output = torch.sign(input)
+            return output
+
+        @staticmethod
+        def backward(ctx, grad_output):
+            # saved tensors - tuple of tensors, so we need get first
+            input, = ctx.saved_variables
+            grad_output[input.ge(1)] = 0
+            grad_output[input.le(-1)] = 0
+            return grad_output
+
+    my_func = MyFunction.apply
 
     class Net(nn.Module):
         def __init__(self):
             super(Net, self).__init__()
             # 1 input image channel, 6 output channels, 5x5 square convolution
             # kernel
-            self.conv1 = nn.Conv2d(1, 6, 5)
-            self.conv2 = nn.Conv2d(6, 16, 5)
-            # an affine operation: y = Wx + b
-            self.fc1 = nn.Linear(256, 120)
-            self.fc2 = nn.Linear(120, 84)
-            self.fc3 = nn.Linear(84, 10)
-            self.drop = nn.Dropout2d()
+            self.layer = nn.Sequential(OrderedDict([
+                ('conv1', nn.Conv2d(1, 6, 5)),
+                ('relu1', nn.ReLU()),
+                ('mp1', nn.MaxPool2d((2, 2))),
+                ('conv2', nn.Conv2d(6, 16, 5)),
+                ('relu2', nn.ReLU()),
+                ('mp2', nn.MaxPool2d((2, 2)))
+            ]))
+            self.fc_layer = nn.Sequential(OrderedDict([
+                ('fc1', nn.Linear(256, 120)),
+                ('fc_relu1', nn.ReLU()),
+                ('fc2', nn.Linear(120, 84)),
+                ('fc_relu2', nn.ReLU()),
+                ('fc3', nn.Linear(84, 10)),
+            ]))
 
         def forward(self, x):
-            m = list()
             in_size = x.size(0)
-            m.append(F.relu(self.conv1(x))) #m[0]: Conv + ReLu
-            m.append(F.max_pool2d(m[0], 2)) #m[1]: MaxPool
-            # x = F.dropout(x, p=0.8)
-            m.append(F.relu(self.conv2(m[1]))) #m[2]: Conv + ReLu
-            m.append(F.max_pool2d(m[2], 2)) #m[3]: MaxPool
-            m[3] = m[3].view(in_size, -1)  # flatten the tensor
-
-            # x = F.dropout(x, p=0.8)
-            m.append(F.relu(self.fc1(m[3]))) #m[4]: Fully-Connected
-            m.append(F.relu(self.fc2(m[4]))) #m[5]: Fully-Connected
-            # x = F.dropout(x, training=self.training)
-            m.append(self.fc3(m[5])) #m[6]: Fully-Connected
-            m.append(F.log_softmax(m[6], dim=1))  # m[6]: Fully-Connected
-            output = m[7]
-            return output, m
+            x = self.layer(x)
+            x = x.view(in_size, -1)  # flatten the tensor
+            x = self.fc_layer(x)
+            return F.log_softmax(x, dim=1)
 
     model = Net()
+
+    # For Forward Hook
+    for name, module in model.layer.named_children():
+        print(name)
+        module.register_forward_hook(printnorm)
+    for name, module in model.fc_layer.named_children():
+        print(name)
+        module.register_forward_hook(printnorm)
+
     if args.cuda:
         model.cuda()
 
-    # for name in model._modules:
-    #     activations = SaveFeatures(model._modules.get(name))
-
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
-
 
     def train(epoch):
         model.train()
@@ -128,58 +150,35 @@ def main():
             data, target = Variable(data), Variable(target)
             optimizer.zero_grad()
 
-            # model.conv2.register_forward_hook(printnorm)
-            # model.conv1.register_forward_hook(printnorm)
-
-            # print(model.conv1.output)
-            #
-            # model.conv1.output.shape
-            # model_out[0].data.shape
-
-            #model.conv1.output == model_out[0].data 이게 같지 않음!!
-
-
-            #Forward Pass
-            output, model_out = model(data)
+            # Forward Pass
+            output = model(data)
             R = output
             loss = F.nll_loss(output, target)
-            #################
-            #Backward Pass
-            loss.backward() #Calculation of Gradient
+
+            # Backward Pass
+            loss.backward()  # Calculation of Gradient
             # param_model = list(model.parameters()) #to show all W in the model
 
-            #
-            # for idx, m in enumerate(model.named_modules()):
-            #     print(idx, '->', )
-            #
+
             # for W in reversed(list(model.parameters())):
-            #     R = LRP(W, R, args.relevance_method, 1e-8)
-            #     # print m.name + '::',
-            #     print(W.grad.data.shape)
-            #
             #     W.grad.data
             #     W.data
 
             # optimizer.step() #Weight Parameter Update using Gradient
             for W in model.parameters():
-                # print(W.grad.data)
                 W.data = W.data - args.lr * W.grad.data
-            #################
 
             if batch_idx % args.log_interval == 0:
                 print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                     epoch, batch_idx * len(data), len(train_loader.dataset),
-                    100. * batch_idx / len(train_loader), loss.data[0]))
+                           100. * batch_idx / len(train_loader), loss.data[0]))
 
-        torch.save(model.state_dict(), './' + args.save_dir + '.pth')
-
-
-
+        if args.save_model:
+            torch.save(model.state_dict(), './' + args.save_dir + '.pth')
 
     def test():
         if args.reload_model:
             model.load_state_dict(torch.load('./' + args.save_dir + '.pth', map_location=lambda storage, loc: storage))
-
 
         model.eval()
         test_loss = 0
@@ -188,40 +187,19 @@ def main():
             if args.cuda:
                 data, target = data.cuda(), target.cuda()
             data, target = Variable(data, volatile=True), Variable(target)
-            output, model_out = model(data)
+            output = model(data)
 
-            #Explanation
+
+            # Explanation
             R = output
-
-            # model_param2 = model.state_dict().iteritems()
-            name_list = []
-            for name in model.named_modules():
-                name_list.append(name)
-
-            for name, param in model.state_dict().items():
-                param
-
-            for param in reversed(list(model.parameters())):
-                param.data.shape
-
-                activation = model_out[idx].data
-                aa = m.parameters().data
-
-            # for aa reversed(model.modules()):
-            #     aa
-
-                # print(idx, '->', m)
-
-            for W in reversed(list(model.parameters())):
-                R = LRP(W, R, args.relevance_method, 1e-8)
-                # print m.name + '::',
-                print(W.grad.data.shape)
-
-                W.grad.data
-                W.data
+            for name, module in model.fc_layer.named_children(): #접근 방법
+                module.output.shape
+            for name, module in model.layer.named_children():  # 접근 방법
+                module.output.shape
 
 
-            # sum up batch loss
+
+
             test_loss += F.nll_loss(output, target, size_average=False).data[0]
             # get the index of the max log-probability
             pred = output.data.max(1, keepdim=True)[1]
@@ -232,11 +210,11 @@ def main():
             test_loss, correct, len(test_loader.dataset),
             100. * correct / len(test_loader.dataset)))
 
-
     for epoch in range(1, args.epochs + 1):
-        # train(epoch)
+        train(epoch)
 
         test()
+
 
 if __name__ == "__main__":
     main()
