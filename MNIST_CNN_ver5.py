@@ -12,17 +12,25 @@ from torch.autograd import Variable, Function
 from modules.data import get_mnist
 from modules.module import Module
 from modules.linearlrp import linearlrp
+from modules.Linear import Linear
+from modules.Convolution import Conv2d
+from modules.Maxpool import MaxPool2d
+from modules.Avgpool import AvgPool2d
+from modules.Softmax import LogSoftmax
+from modules.Relu import ReLU
 
 from modules.save_model import save_model
 
 from collections import OrderedDict
 
+layer_name = []
+
 def main():
     # Training settings
     parser = argparse.ArgumentParser(description='PyTorch MNIST')
-    parser.add_argument('--batch-size', type=int, default=99, metavar='N',
+    parser.add_argument('--batch-size', type=int, default=100, metavar='N',
                         help='input batch size for training (default: 64)')
-    parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
+    parser.add_argument('--test-batch-size', type=int, default=1001, metavar='N',
                         help='input batch size for testing (default: 1000)')
     parser.add_argument('--epochs', type=int, default=10, metavar='N',
                         help='number of epochs to train (default: 10)')
@@ -40,9 +48,9 @@ def main():
                         help='relevance methods: simple/eps/w^2/alphabeta')
     parser.add_argument('--save-dir', type=str, default='model', metavar='N',
                         help='saved directory')
-    parser.add_argument('--save-model', type=bool, default=False, metavar='N',
+    parser.add_argument('--save-model', type=bool, default=True, metavar='N',
                         help='Save the trained model')
-    parser.add_argument('--reload-model', type=bool, default=True, metavar='N',
+    parser.add_argument('--reload-model', type=bool, default=False, metavar='N',
                         help='Restore the trained model')
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -81,26 +89,27 @@ def main():
         self.input = input[0]
         self.output = output.data
 
+
     class Net(nn.Module):
         def __init__(self):
             super(Net, self).__init__()
             # 1 input image channel, 6 output channels, 5x5 square convolution
             # kernel
             self.layer = nn.Sequential(OrderedDict([
-                ('conv1', nn.Conv2d(1, 6, 5)),
-                ('relu1', nn.ReLU()),
-                ('mp1', nn.MaxPool2d((2, 2))),
-                ('conv2', nn.Conv2d(6, 16, 5)),
-                ('relu2', nn.ReLU()),
-                ('mp2', nn.MaxPool2d((2, 2)))
+                ('conv1', Conv2d(1, 6, 5)),
+                ('relu1', ReLU()),
+                ('mp1', MaxPool2d((2, 2))),
+                ('conv2', Conv2d(6, 16, 5)),
+                ('relu2', ReLU()),
+                ('mp2', MaxPool2d((2, 2)))
             ]))
             self.fc_layer = nn.Sequential(OrderedDict([
-                ('fc1', nn.Linear(256, 120)),
-                ('fc_relu1', nn.ReLU()),
-                ('fc2', nn.Linear(120, 84)),
-                ('fc_relu2', nn.ReLU()),
-                ('fc3', nn.Linear(84, 10)),
-                ('sm', nn.LogSoftmax(dim=1))
+                ('fc1', Linear(256, 120)),
+                ('fc_relu1', ReLU()),
+                ('fc2', Linear(120, 84)),
+                ('fc_relu2', ReLU()),
+                ('fc3', Linear(84, 10)),
+                ('sm', LogSoftmax(dim=1))
 
             ]))
 
@@ -111,15 +120,31 @@ def main():
             x = self.fc_layer(x)
             return x
 
-    model = Net()
 
-    # For Forward Hook
-    for name, module in model.layer.named_children():
-        print(name)
-        module.register_forward_hook(printnorm)
-    for name, module in model.fc_layer.named_children():
-        print(name)
-        module.register_forward_hook(printnorm)
+        def forward_hook(self):
+            # For Forward Hook
+            global layer_name
+            for name, module in self.layer.named_children():
+                module.register_forward_hook(printnorm)
+                layer_name.append(name)
+            for name, module in self.fc_layer.named_children():
+                module.register_forward_hook(printnorm)
+                layer_name.append(name)
+
+        def lrp(self, R):
+            for cur_layer in layer_name[::-1]:
+                for name, module in self.fc_layer.named_children():  # 접근 방법
+                    if name is cur_layer:
+                        print(name)
+                        R = module.lrp(R, args.relevance_method, 1e-8)
+
+                for name, module in self.layer.named_children():  # 접근 방법
+                    if name is cur_layer:
+                        print(name)
+                        R = module.lrp(R, args.relevance_method, 1e-8)
+
+    model = Net()
+    model.forward_hook()
 
     if args.cuda:
         model.cuda()
@@ -139,6 +164,7 @@ def main():
             R = output
             loss = F.nll_loss(output, target)
 
+            model.lrp(loss)
             # Backward Pass
             loss.backward()  # Calculation of Gradient
             # param_model = list(model.parameters()) #to show all W in the model
@@ -180,15 +206,15 @@ def main():
             # input_tensor = []
             # args.relevance_method
             # param = 1e-8
-
-            for name, module in model.layer.named_children():  # 접근 방법
-                R = Module(name, module, R, args.relevance_method, 1e-8)
-
-                print(name)
-                module.weight.shape
-            for name, module in model.fc_layer.named_children(): #접근 방법
-                print(name)
-                module.output.shape
+            #
+            # for name, module in model.layer.named_children():  # 접근 방법
+            #     R = Module(name, module, R, args.relevance_method, 1e-8)
+            #
+            #     print(name)
+            #     module.weight.shape
+            # for name, module in model.fc_layer.named_children(): #접근 방법
+            #     print(name)
+            #     module.output.shape
 
 
 

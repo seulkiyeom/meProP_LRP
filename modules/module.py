@@ -3,6 +3,39 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Function
+# from modules.LRP import
+
+layer_count = 0
+class Module:
+    def __init__(self, name, module, R, lrp_var=None, param=None):
+        self.name = name
+        self.input_tensor = module.input
+        self.output_tensor = module.output
+        self.weight = module.weight
+        self.bias = module.bias
+        self.lrp_var = lrp_var
+        self.param = param
+
+        return self.lrp()
+
+        ''' The constructor '''
+        global layer_count
+        layer_count = layer_count + 1
+
+        # if hasattr(self, 'name'):
+        #     self.name = self.name + '_' + str(layer_count)
+
+    def lrp(self):
+        # if self.name:
+        #
+        # if self.lrp_var is None or self.lrp_var.lower() == 'none' or self.lrp_var.lower() == 'simple':
+        #     return simple_lrp(R, self.input_tensor, self.output_tensor, self.weight, self.bias)
+        # elif lrp_var.lower() == 'alphabeta' or lrp_var.lower() == 'alpha':
+        #     return alphabeta_lrp(R, self.param)
+
+        print(self.weight.shape)
+
+        return 0
 
 class GuidedBackpropRelu(Function):
     @staticmethod
