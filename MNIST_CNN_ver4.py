@@ -118,6 +118,8 @@ def main():
                 ('fc2', nn.Linear(120, 84)),
                 ('fc_relu2', nn.ReLU()),
                 ('fc3', nn.Linear(84, 10)),
+                ('sm', nn.LogSoftmax(dim=1))
+
             ]))
 
         def forward(self, x):
@@ -125,7 +127,7 @@ def main():
             x = self.layer(x)
             x = x.view(in_size, -1)  # flatten the tensor
             x = self.fc_layer(x)
-            return F.log_softmax(x, dim=1)
+            return x
 
     model = Net()
 
@@ -192,10 +194,11 @@ def main():
 
             # Explanation
             R = output
-            for name, module in model.fc_layer.named_children(): #접근 방법
-                module.output.shape
-            for name, module in model.layer.named_children():  # 접근 방법
-                module.output.shape
+
+            # for name, module in model.fc_layer.named_children(): #접근 방법
+            #     module.output.shape
+            # for name, module in model.layer.named_children():  # 접근 방법
+            #     module.output.shape
 
 
 
