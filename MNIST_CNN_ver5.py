@@ -44,7 +44,7 @@ def main():
                         help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                         help='how many batches to wait before logging training status')
-    parser.add_argument('--relevance-method', type=str, default='alphabeta', metavar='N',
+    parser.add_argument('--relevance-method', type=str, default='simple', metavar='N',
                         help='relevance methods: simple/eps/w^2/alphabeta')
     parser.add_argument('--save-dir', type=str, default='model', metavar='N',
                         help='saved directory')
@@ -98,10 +98,10 @@ def main():
             self.layer = nn.Sequential(OrderedDict([
                 ('conv1', Conv2d(1, 6, 5)),
                 ('relu1', ReLU()),
-                ('mp1', MaxPool2d((2, 2))),
+                ('mp1', MaxPool2d(2)),
                 ('conv2', Conv2d(6, 16, 5)),
                 ('relu2', ReLU()),
-                ('mp2', MaxPool2d((2, 2)))
+                ('mp2', MaxPool2d(2))
             ]))
             self.fc_layer = nn.Sequential(OrderedDict([
                 ('fc1', Linear(256, 120)),

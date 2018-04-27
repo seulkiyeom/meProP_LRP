@@ -1,10 +1,13 @@
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.autograd import Variable
+
 import torch.nn.functional as F
 from torch.autograd import Function
-def where(cond, x_1, x_2):
-    return (cond * x_1) + ((1-cond) * x_2)
+def where(condition, x, y):
+    return Variable(condition.float()) * x + Variable((condition != 1).float()) * y
+
 
 class Linear(nn.Module):
    def __init__(self, input_dim, output_dim):
@@ -33,7 +36,7 @@ class Linear(nn.Module):
 
        Z = torch.unsqueeze(torch.transpose(self.layer.weight, 0, 1), 0) * torch.unsqueeze(self.input, -1)
        Zs = torch.unsqueeze(torch.sum(Z, dim=1), 1) + torch.unsqueeze(torch.unsqueeze(self.layer.bias, 0), 0)
-       stabilizer = 1e-8 * np.where(Zs >= 0, torch.ones_like(Zs), torch.ones_like(Zs) * -1)
+       stabilizer = 1e-8 * where(Zs >= 0, torch.ones_like(Zs), torch.ones_like(Zs) * -1)
        Zs += torch.Tensor(stabilizer)
 
        return torch.sum((Z / Zs) * torch.unsqueeze(self.R, 1), dim=2)
@@ -41,15 +44,24 @@ class Linear(nn.Module):
    def _alphabeta_lrp(self, R, alpha):
        self.R = R
        beta = 1 - alpha
-
        Z = torch.unsqueeze(torch.transpose(self.layer.weight, 0, 1), 0) * torch.unsqueeze(self.input, -1)
+
        if not alpha == 0:
-           Zp = np.where(Z > 0, Z, torch.zeros_like(Z))
-           Zp = where(torch.ByteTensor(Z > 0), Z, torch.zeros_like(Z))
-           term2 = torch.unsqueeze()
+           Zp = where(Z > 0, Z, torch.zeros_like(Z))
+           term2 = torch.unsqueeze(torch.unsqueeze(where(self.layer.bias > 0, self.layer.bias, torch.zeros_like(self.layer.bias)), 0), 0)
+           term1 = torch.unsqueeze(torch.sum(Zp, dim=1), 1)
+           Zsp = term1 + term2
+           Ralpha = alpha * torch.sum((Zp / Zsp) * torch.unsqueeze(self.R, 1), dim=2)
+       else:
+           Ralpha = 0
 
+       if not beta == 0:
+           Zn = where(Z < 0, Z, torch.zeros_like(Z))
+           term2 = torch.unsqueeze(torch.unsqueeze(where(self.layer.bias < 0, self.layer.bias, torch.zeros_like(self.layer.bias)), 0), 0)
+           term1 = torch.unsqueeze(torch.sum(Zn, dim=1), 1)
+           Zsp = term1 + term2
+           Rbeta = beta * torch.sum((Zn / Zsp) * torch.unsqueeze(self.R, 1), dim=2)
+       else:
+           Rbeta = 0
 
-       Zs = tf.expand_dims(tf.reduce_sum(Z, 1), 1) + tf.expand_dims(tf.expand_dims(self.biases, 0), 0)
-       stabilizer = 1e-8 * (tf.where(tf.greater_equal(Zs, 0), tf.ones_like(Zs, dtype=tf.float32),
-                                     tf.ones_like(Zs, dtype=tf.float32) * -1))
-       Zs += stabilizer
+       return Ralpha + Rbeta

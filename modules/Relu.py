@@ -15,6 +15,5 @@ class ReLU(nn.Module):
        return self.layer.forward(input_tensor)
    #
    def lrp(self, R, lrp_var=None,param=None):
-       print(self.input)
 
-       return 0
+       return R
