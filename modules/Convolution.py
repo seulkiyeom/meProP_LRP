@@ -33,14 +33,14 @@ class Conv2d(nn.Module):
        NF, df, hf, wf = self.layer.weight.shape
        hstride, wstride = self.layer.stride
 
-       Rx = torch.zeros_like(self.input).float()
+       Rx = torch.zeros_like(self.input)
 
        for i in range(self.Hout):
            for j in range(self.Wout):
                Z = torch.unsqueeze(self.layer.weight, 0) * torch.unsqueeze(self.input[:, :, i * hstride:i * hstride + hf, j * wstride:j * wstride + wf], 1)
                Zs = Z.sum(2, keepdim=True).sum(3, keepdim=True).sum(4, keepdim=True) + torch.unsqueeze(torch.unsqueeze(torch.unsqueeze(torch.unsqueeze(self.layer.bias, 0), 2), 2), 2)
                Zs += 1e-12 * (where(Zs >= 0, torch.ones_like(Zs), torch.ones_like(Zs) * -1))
-               Rx[:, :, i * hstride:i * hstride + hf:, j * wstride:j * wstride + wf:] += ((Z / Zs) * torch.unsqueeze(self.R[:, :, i:i + 1, j:j + 1],-1)).sum(dim=1)
+               Rx[:, :, i * hstride:i * hstride + hf:, j * wstride:j * wstride + wf:] += ((Z / Zs) * torch.unsqueeze(self.R[:, :, i:i + 1, j:j + 1], 2)).sum(dim=1)
        return Rx
 
    def _alphabeta_lrp(self, R, alpha):
@@ -50,7 +50,7 @@ class Conv2d(nn.Module):
        NF, df, hf, wf = self.layer.weight.shape
        hstride, wstride = self.layer.stride
 
-       Rx = torch.zeros_like(self.input).float()
+       Rx = torch.zeros_like(self.input)
 
        for i in range(self.Hout):
            for j in range(self.Wout):
@@ -61,7 +61,8 @@ class Conv2d(nn.Module):
                    Zp = where(Z > 0, Z, torch.zeros_like(Z))
                    Bp = torch.unsqueeze(torch.unsqueeze(torch.unsqueeze(torch.unsqueeze(where(self.layer.bias > 0, self.layer.bias, torch.zeros_like(self.layer.bias)), 0), 2), 2), 2)
                    Zsp = Zp.sum(2, keepdim=True).sum(3, keepdim=True).sum(4, keepdim=True) + Bp
-                   Ralpha = alpha * ((Zp/Zsp) * torch.unsqueeze(self.R[:, :, i:i + 1, j:j + 1], -1)).sum(dim=1)
+                   Zsp += 1e-12 * (where(Zsp >= 0, torch.ones_like(Zsp), torch.ones_like(Zsp) * -1))
+                   Ralpha = alpha * ((Zp/Zsp) * torch.unsqueeze(self.R[:, :, i:i + 1, j:j + 1], 2)).sum(dim=1)
                else:
                    Ralpha = 0
 
@@ -71,42 +72,14 @@ class Conv2d(nn.Module):
                        torch.unsqueeze(where(self.layer.bias < 0, self.layer.bias, torch.zeros_like(self.layer.bias)),
                                        0), 2), 2), 2)
                    Zsn = Zn.sum(2, keepdim=True).sum(3, keepdim=True).sum(4, keepdim=True) + Bn
-                   Rbeta = beta * ((Zn / Zsn) * torch.unsqueeze(self.R[:, :, i:i + 1, j:j + 1], -1)).sum(dim=1)
+                   Zsn += 1e-12 * (where(Zsn >= 0, torch.ones_like(Zsn), torch.ones_like(Zsn) * -1))
+                   Rbeta = beta * ((Zn/Zsn) * torch.unsqueeze(self.R[:, :, i:i + 1, j:j + 1], 2)).sum(dim=1)
                else:
                    Rbeta = 0
 
                Rx[:, :, i * hstride:i * hstride + hf:, j * wstride:j * wstride + wf:] += Ralpha + Rbeta
 
        return Rx
-
-               # Zs = Z.sum(axis=(1, 2, 3), keepdims=True) + self.B[na, na, na, na, ...]
-               # Zs += 1e-12 * ((Zs >= 0) * 2 - 1.)  # add a weak numerical stabilizer to cushion division by zero
-               # Rx[:, i * hstride:i * hstride + hf:, j * wstride:j * wstride + wf:, :] += (
-               #             (Z / Zs) * R[:, i:i + 1, j:j + 1, na, :]).sum(axis=4)
-               #
-               #
-               #
-               #
-               #
-               # if not alpha == 0:
-               #
-               #     Bp = (self.B * (self.B > 0))[na, na, na, na, ...]
-               #     Zsp = Zp.sum(axis=(1, 2, 3), keepdims=True) + Bp
-               #     Ralpha = alpha * ((Zp / Zsp) * R[:, i:i + 1, j:j + 1, na, :]).sum(axis=4)
-               # else:
-               #     Ralpha = 0
-               #
-               # if not beta == 0:
-               #
-               #     Bn = (self.B * (self.B < 0))[na, na, na, na, ...]
-               #     Zsn = Zn.sum(axis=(1, 2, 3), keepdims=True) + Bn
-               #     Rbeta = beta * ((Zn / Zsn) * R[:, i:i + 1, j:j + 1, na, :]).sum(axis=4)
-               # else:
-               #     Rbeta = 0
-
-
-
-
 
    def check_shape(self, R):
        self.R = R

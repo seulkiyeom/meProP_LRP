@@ -44,13 +44,13 @@ def main():
                         help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                         help='how many batches to wait before logging training status')
-    parser.add_argument('--relevance-method', type=str, default='simple', metavar='N',
+    parser.add_argument('--relevance-method', type=str, default='alphabeta', metavar='N',
                         help='relevance methods: simple/eps/w^2/alphabeta')
     parser.add_argument('--save-dir', type=str, default='model', metavar='N',
                         help='saved directory')
-    parser.add_argument('--save-model', type=bool, default=True, metavar='N',
+    parser.add_argument('--save-model', type=bool, default=False, metavar='N',
                         help='Save the trained model')
-    parser.add_argument('--reload-model', type=bool, default=False, metavar='N',
+    parser.add_argument('--reload-model', type=bool, default=True, metavar='N',
                         help='Restore the trained model')
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -143,6 +143,8 @@ def main():
                         print(name)
                         R = module.lrp(R, args.relevance_method, 1e-8)
 
+            return R
+
     model = Net()
     model.forward_hook()
 
@@ -164,7 +166,7 @@ def main():
             R = output
             loss = F.nll_loss(output, target)
 
-            model.lrp(loss)
+            # model.lrp(R)
             # Backward Pass
             loss.backward()  # Calculation of Gradient
             # param_model = list(model.parameters()) #to show all W in the model
@@ -202,23 +204,7 @@ def main():
 
             # Explanation
             R = output
-
-            # input_tensor = []
-            # args.relevance_method
-            # param = 1e-8
-            #
-            # for name, module in model.layer.named_children():  # 접근 방법
-            #     R = Module(name, module, R, args.relevance_method, 1e-8)
-            #
-            #     print(name)
-            #     module.weight.shape
-            # for name, module in model.fc_layer.named_children(): #접근 방법
-            #     print(name)
-            #     module.output.shape
-
-
-
-
+            R_out = model.lrp(R)
 
             test_loss += F.nll_loss(output, target, size_average=False).data[0]
             # get the index of the max log-probability
@@ -231,7 +217,7 @@ def main():
             100. * correct / len(test_loader.dataset)))
 
     for epoch in range(1, args.epochs + 1):
-        train(epoch)
+        # train(epoch)
 
         test()
 

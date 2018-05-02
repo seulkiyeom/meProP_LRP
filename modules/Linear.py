@@ -8,7 +8,6 @@ from torch.autograd import Function
 def where(condition, x, y):
     return Variable(condition.float()) * x + Variable((condition != 1).float()) * y
 
-
 class Linear(nn.Module):
    def __init__(self, input_dim, output_dim):
        super(Linear, self).__init__()
@@ -35,9 +34,9 @@ class Linear(nn.Module):
            self.R = torch.reshape(self.R, output_shape)
 
        Z = torch.unsqueeze(torch.transpose(self.layer.weight, 0, 1), 0) * torch.unsqueeze(self.input, -1)
-       Zs = torch.unsqueeze(torch.sum(Z, dim=1), 1) + torch.unsqueeze(torch.unsqueeze(self.layer.bias, 0), 0)
+       Zs = Z.sum(1, keepdim=True) + torch.unsqueeze(torch.unsqueeze(self.layer.bias, 0), 0)
        stabilizer = 1e-8 * where(Zs >= 0, torch.ones_like(Zs), torch.ones_like(Zs) * -1)
-       Zs += torch.Tensor(stabilizer)
+       Zs += stabilizer
 
        return torch.sum((Z / Zs) * torch.unsqueeze(self.R, 1), dim=2)
 
@@ -46,10 +45,12 @@ class Linear(nn.Module):
        beta = 1 - alpha
        Z = torch.unsqueeze(torch.transpose(self.layer.weight, 0, 1), 0) * torch.unsqueeze(self.input, -1)
 
+       Rx = torch.zeros_like(self.input)
+
        if not alpha == 0:
            Zp = where(Z > 0, Z, torch.zeros_like(Z))
            term2 = torch.unsqueeze(torch.unsqueeze(where(self.layer.bias > 0, self.layer.bias, torch.zeros_like(self.layer.bias)), 0), 0)
-           term1 = torch.unsqueeze(torch.sum(Zp, dim=1), 1)
+           term1 = Zp.sum(1, keepdim=True)
            Zsp = term1 + term2
            Ralpha = alpha * torch.sum((Zp / Zsp) * torch.unsqueeze(self.R, 1), dim=2)
        else:
@@ -58,10 +59,12 @@ class Linear(nn.Module):
        if not beta == 0:
            Zn = where(Z < 0, Z, torch.zeros_like(Z))
            term2 = torch.unsqueeze(torch.unsqueeze(where(self.layer.bias < 0, self.layer.bias, torch.zeros_like(self.layer.bias)), 0), 0)
-           term1 = torch.unsqueeze(torch.sum(Zn, dim=1), 1)
+           term1 = Zn.sum(1, keepdim=True)
            Zsp = term1 + term2
            Rbeta = beta * torch.sum((Zn / Zsp) * torch.unsqueeze(self.R, 1), dim=2)
        else:
            Rbeta = 0
 
-       return Ralpha + Rbeta
+       Rx = Ralpha + Rbeta
+
+       return Rx
