@@ -13,8 +13,43 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torch.utils.data
 from torch.autograd import Variable
+import modules.render as render
+import numpy as np
+import matplotlib.pyplot as plt
 
 from modules.model import Net
+
+
+def visualize(relevances, images_tensor=None, image_show=False, image_save=False):
+    n, w, h, dim = relevances.shape
+    heatmaps = []
+    count = 0
+    #import pdb;pdb.set_trace()
+    if images_tensor is not None:
+        assert relevances.shape==images_tensor.shape, 'Relevances shape != Images shape'
+    for h,heat in enumerate(relevances):
+        if images_tensor is not None:
+            input_image = images_tensor[h]
+            maps = render.hm_to_rgb(heat, input_image, scaling = 3, sigma = 2)
+        else:
+            maps = render.hm_to_rgb(heat, scaling = 3, sigma = 2)
+        heatmaps.append(maps)
+        if image_show:
+            plt.imshow(maps)
+        if image_save:
+            plt.imsave('saved_image/' + str(count), maps, format="png")
+            count += 1
+
+    R = np.array(heatmaps)
+
+def plot_relevances(rel, img, image_show = False, image_save = False):
+    rel = rel.permute(0, 2, 3, 1).data.numpy()
+    img = img.permute(0, 2, 3, 1).data.numpy()
+
+    visualize(rel, img, image_show, image_save)
+
+
+
 
 class TestGroup(object):
     '''
