@@ -45,6 +45,23 @@ def get_mnist(datapath='./data/', download=True):
                                   transform=transforms.ToTensor())
     return train_dataset, test_dataset
 
+def get_cifar10(datapath='./data/', download=True):
+    '''
+    The MNIST dataset in PyTorch does not have a development set, and has its own format.
+    We use the first 5000 examples from the training dataset as the development dataset. (the same with TensorFlow)
+    Assuming 'datapath/processed/training.pt' and 'datapath/processed/test.pt' exist, if download is set to False.
+    '''
+    # MNIST Dataset
+    train_dataset = datasets.CIFAR10(root=datapath,
+                                   train=True,
+                                   transform=transforms.ToTensor(),
+                                   download=download)
+
+    test_dataset = datasets.CIFAR10(root=datapath,
+                                  train=False,
+                                  transform=transforms.ToTensor())
+    return train_dataset, test_dataset
+
 
 def get_artificial_dataset(nsample, ninfeature, noutfeature):
     '''

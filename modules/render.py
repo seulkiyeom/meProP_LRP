@@ -18,6 +18,7 @@ from matplotlib.cm import ScalarMappable
 import skimage.io
 import skimage.feature
 import skimage.filters
+import matplotlib.pyplot as plt
 
 
 def vec2im(V, shape = () ):
@@ -212,10 +213,10 @@ def hm_to_rgb(R, X = None, scaling = 3, shape = (), sigma = 2, cmap = 'jet', nor
 
     R = enlarge_image(vec2im(R,shape), scaling)
     rgb = cmap(R.flatten())[...,0:3].reshape([R.shape[0],R.shape[1],3])
-    #rgb = repaint_corner_pixels(rgb, scaling) #obsolete due to directly calling the color map with [0,1]-normalized inputs
+  #rgb = repaint_corner_pixels(rgb, scaling) #obsolete due to directly calling the color map with [0,1]-normalized inputs
 
     if not X is None: #compute the outline of the input
-        X = enlarge_image(vec2im(X,shape), scaling)
+        X = enlarge_image(vec2im(X, shape), scaling)
         xdims = X.shape
         Rdims = R.shape
 
@@ -230,6 +231,27 @@ def hm_to_rgb(R, X = None, scaling = 3, shape = (), sigma = 2, cmap = 'jet', nor
             rgb *= edges # set outline pixels to black color
 
     return rgb
+
+def hm_to_rgb_3d(R, X = None, scaling = 3, shape = (), sigma = 2, cmap = 'jet', normalize = True):
+    "See hm_to_rgb function"
+
+    #create color map object from name string
+    cmap = eval('matplotlib.cm.{}'.format(cmap))
+
+    if normalize:
+        R = R / np.max(np.abs(R)) # normalize to [-1,1] wrt to max relevance magnitude
+        R = (R + 1.)/2. # shift/normalize to [0,1] for color mapping
+
+    R = enlarge_image(vec2im(R,shape), scaling)
+    rgb = cmap(R.flatten())[...,0:3].reshape([R.shape[0],R.shape[1],3])
+  #rgb = repaint_corner_pixels(rgb, scaling) #obsolete due to directly calling the color map with [0,1]-normalized inputs
+
+    if not X is None: #compute the outline of the input
+        X = enlarge_image(X, scaling)
+        xdims = X.shape
+        Rdims = R.shape
+
+    return rgb, X
 
 
 def save_image(rgb_images, path, gap = 2):
@@ -258,7 +280,7 @@ def save_image(rgb_images, path, gap = 2):
 
     sz = []
     image = []
-    for i in xrange(len(rgb_images)):
+    for i in range(len(rgb_images)):
         if not sz:
             sz = rgb_images[i].shape
             image = rgb_images[i]
