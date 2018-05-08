@@ -33,7 +33,7 @@ def main():
                         help='input batch size for testing (default: 1000)')
     parser.add_argument('--epochs', type=int, default=1000, metavar='N',
                         help='number of epochs to train (default: 10)')
-    parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
+    parser.add_argument('--lr', type=float, default=0.001, metavar='LR',
                         help='learning rate (default: 0.01)')
     parser.add_argument('--momentum', type=float, default=0.5, metavar='M',
                         help='SGD momentum (default: 0.5)')
@@ -49,9 +49,9 @@ def main():
                         help='saved directory')
     parser.add_argument('--save-model', type=bool, default=False, metavar='N',
                         help='Save the trained model')
-    parser.add_argument('--reload-model', type=bool, default=True, metavar='N',
+    parser.add_argument('--reload-model', type=bool, default=False, metavar='N',
                         help='Restore the trained model')
-    parser.add_argument('--relevance', type=bool, default=True, metavar='N',
+    parser.add_argument('--relevance', type=bool, default=False, metavar='N',
                         help='Compute relevances')
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -228,10 +228,10 @@ def main():
         if args.relevance:
             plot_relevances_3d(R_tot, data_tot, image_show=True, image_save=True)
 
-    # for epoch in range(1, args.epochs + 1):
-    #     train(epoch)
-    #
-    #     test() #매 epoch 마다 테스트 하고싶으면
+    for epoch in range(1, args.epochs + 1):
+        train(epoch)
+
+        test() #매 epoch 마다 테스트 하고싶으면
 
     test() #훈련되어 있는 training model에 test만
 

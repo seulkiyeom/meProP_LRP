@@ -19,9 +19,6 @@ import matplotlib.pyplot as plt
 import plotly.plotly as py
 import plotly.graph_objs as go
 
-from modules.model import Net
-
-
 def visualize(relevances, images_tensor=None, image_show=False, image_save=False):
     n, w, h, dim = relevances.shape
     heatmaps = []

@@ -19,7 +19,7 @@ from modules.Maxpool import MaxPool2d
 from modules.Avgpool import AvgPool2d
 from modules.Softmax import LogSoftmax
 from modules.Relu import ReLU
-from modules.util import plot_relevances
+from modules.util import plot_relevances, plot_relevances_3d
 from collections import OrderedDict
 
 layer_name = []

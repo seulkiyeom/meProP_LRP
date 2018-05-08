@@ -3,27 +3,35 @@ from __future__ import print_function
 import os
 import sys
 import argparse
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
-from torch.autograd import Variable
-from modules.data import get_mnist
-from modules.module import LRP
-from modules.save_model import save_model
-
+from torch.autograd import Variable, Function
+from modules.data import get_mnist, get_cifar10, get_medical_data
+# from modules.module import Module
+# from modules.linearlrp import linearlrp
+from modules.Linear import Linear
+from modules.Convolution import Conv2d
+from modules.Maxpool import MaxPool2d
+from modules.Avgpool import AvgPool2d
+from modules.Softmax import LogSoftmax
+from modules.Relu import ReLU
+from modules.util import plot_relevances, plot_relevances_3d
 from collections import OrderedDict
 
+layer_name = []
 
 def main():
     # Training settings
-    parser = argparse.ArgumentParser(description='PyTorch MNIST')
-    parser.add_argument('--batch-size', type=int, default=99, metavar='N',
+    parser = argparse.ArgumentParser(description='PyTorch CIFAR10')
+    parser.add_argument('--batch-size', type=int, default=50, metavar='N',
                         help='input batch size for training (default: 64)')
-    parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
+    parser.add_argument('--test-batch-size', type=int, default=50, metavar='N',
                         help='input batch size for testing (default: 1000)')
-    parser.add_argument('--epochs', type=int, default=10, metavar='N',
+    parser.add_argument('--epochs', type=int, default=1000, metavar='N',
                         help='number of epochs to train (default: 10)')
     parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
                         help='learning rate (default: 0.01)')
@@ -37,10 +45,14 @@ def main():
                         help='how many batches to wait before logging training status')
     parser.add_argument('--relevance-method', type=str, default='simple', metavar='N',
                         help='relevance methods: simple/eps/w^2/alphabeta')
-    parser.add_argument('--save-dir', type=str, default='model', metavar='N',
+    parser.add_argument('--save-dir', type=str, default='medical_model', metavar='N',
                         help='saved directory')
+    parser.add_argument('--save-model', type=bool, default=True, metavar='N',
+                        help='Save the trained model')
     parser.add_argument('--reload-model', type=bool, default=False, metavar='N',
                         help='Restore the trained model')
+    parser.add_argument('--relevance', type=bool, default=True, metavar='N',
+                        help='Compute relevances')
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -51,7 +63,7 @@ def main():
     kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
     # MNIST Dataset
     # Data Acquisition
-    train_dataset, test_dataset = get_mnist()
+    train_dataset, test_dataset = get_medical_data()
 
     # Data Loader (Input Pipeline)
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
@@ -65,38 +77,38 @@ def main():
     def printnorm(self, input, output):
         # input is a tuple of packed inputs
         # output is a Variable. output.data is the Tensor we are interested
-
         # print('Inside ' + self.__class__.__name__ + ' forward')
-        # print('')
-        # print('input: ', type(input))
-        # print('input[0]: ', type(input[0]))
-        # print('output: ', type(output))
-        # print('')
-        # print('input size:', input[0].size())
-        # print('output size:', output.data.size())
-        # print('output norm:', output.data.norm())
-
+        self.input = input[0]
         self.output = output.data
+
+    def convert_to_one_hot(Y, num_classes=None):
+        new_Y = torch.zeros(len(Y), 2)
+        for i in range(len(Y)):
+            new_Y[i, Y[i].numpy()] = 1
+        return new_Y
+
 
     class Net(nn.Module):
         def __init__(self):
             super(Net, self).__init__()
-            # 1 input image channel, 6 output channels, 5x5 square convolution
+            # 3 input image channel, 6 output channels, 5x5 square convolution
             # kernel
             self.layer = nn.Sequential(OrderedDict([
-                ('conv1', nn.Conv2d(1, 6, 5)),
-                ('relu1', nn.ReLU()),
-                ('mp1', nn.MaxPool2d((2, 2))),
-                ('conv2', nn.Conv2d(6, 16, 5)),
-                ('relu2', nn.ReLU()),
-                ('mp2', nn.MaxPool2d((2, 2)))
+                ('conv1', Conv2d(3, 6, 5)),
+                ('relu1', ReLU()),
+                ('mp1', MaxPool2d(2)),
+                ('conv2', Conv2d(6, 16, 5)),
+                ('relu2', ReLU()),
+                ('mp2', MaxPool2d(2))
             ]))
             self.fc_layer = nn.Sequential(OrderedDict([
-                ('fc1', nn.Linear(256, 120)),
-                ('fc_relu1', nn.ReLU()),
-                ('fc2', nn.Linear(120, 84)),
-                ('fc_relu2', nn.ReLU()),
-                ('fc3', nn.Linear(84, 10)),
+                ('fc1', Linear(35344, 120)),
+                ('fc_relu1', ReLU()),
+                ('fc2', Linear(120, 84)),
+                ('fc_relu2', ReLU()),
+                ('fc3', Linear(84, 2)),
+                ('sm', LogSoftmax(dim=1))
+
             ]))
 
         def forward(self, x):
@@ -104,22 +116,50 @@ def main():
             x = self.layer(x)
             x = x.view(in_size, -1)  # flatten the tensor
             x = self.fc_layer(x)
-            return F.log_softmax(x, dim=1)
+            return x
+
+
+        def forward_hook(self):
+            # For Forward Hook
+            global layer_name
+            for name, module in self.layer.named_children():
+                self.hook = module.register_forward_hook(printnorm)
+                layer_name.append(name)
+            for name, module in self.fc_layer.named_children():
+                self.hook = module.register_forward_hook(printnorm)
+                layer_name.append(name)
+
+
+        def lrp(self, R):
+            for cur_layer in layer_name[::-1]:
+                find = False
+                for name, module in self.fc_layer.named_children():  # 접근 방법
+                    if name is cur_layer:
+                        # print(name)
+                        R = module.lrp(R, args.relevance_method, 1e-8)
+                        # self.hook.remove()
+                        find = True
+                    if find:
+                        break
+
+                for name, module in self.layer.named_children():  # 접근 방법
+                    if name is cur_layer:
+                        # print(name)
+                        R = module.lrp(R, args.relevance_method, 1e-8)
+                        # self.hook.remove()
+                        find = True
+                    if find:
+                        break
+
+            return R
 
     model = Net()
-    for name, module in model.layer.named_children():
-        print(name)
-        module.register_forward_hook(printnorm)
-    for name, module in model.fc_layer.named_children():
-        print(name)
-        module.register_forward_hook(printnorm)
 
+    if args.relevance:
+        model.forward_hook()
 
     if args.cuda:
         model.cuda()
-
-    # for name in model._modules:
-    #     activations = SaveFeatures(model._modules.get(name))
 
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
 
@@ -131,55 +171,39 @@ def main():
             data, target = Variable(data), Variable(target)
             optimizer.zero_grad()
 
-            # model.conv2.register_forward_hook(printnorm)
-            # model.conv1.register_forward_hook(printnorm)
-
-            # print(model.conv1.output)
-            #
-            # model.conv1.output.shape
-            # model_out[0].data.shape
-
-            # model.conv1.output == model_out[0].data 이게 같지 않음!!
-
             # Forward Pass
             output = model(data)
-
-            for name, module in model.layer.named_children():
-                module.output.shape
-
             R = output
-            loss = F.nll_loss(output, target)
-            #################
+            target = convert_to_one_hot(target, num_classes=2)
+
+            # loss = F.nll_loss(output, target.float())
+            loss = F.binary_cross_entropy_with_logits(output, target.cuda())
+
+            # model.lrp(R)
             # Backward Pass
             loss.backward()  # Calculation of Gradient
             # param_model = list(model.parameters()) #to show all W in the model
 
-            #
-            # for idx, m in enumerate(model.named_modules()):
-            #     print(idx, '->', )
-            #
+
             # for W in reversed(list(model.parameters())):
-            #     R = LRP(W, R, args.relevance_method, 1e-8)
-            #     # print m.name + '::',
-            #     print(W.grad.data.shape)
-            #
             #     W.grad.data
             #     W.data
 
             # optimizer.step() #Weight Parameter Update using Gradient
             for W in model.parameters():
-                # print(W.grad.data)
                 W.data = W.data - args.lr * W.grad.data
-            #################
 
             if batch_idx % args.log_interval == 0:
                 print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                     epoch, batch_idx * len(data), len(train_loader.dataset),
-                           100. * batch_idx / len(train_loader), loss.data[0]))
+                           100. * batch_idx / len(train_loader), loss.item()))
 
-        torch.save(model.state_dict(), './' + args.save_dir + '.pth')
+        if args.save_model:
+            torch.save(model.state_dict(), './' + args.save_dir + '.pth')
 
     def test():
+        R_tot = []
+        data_tot = []
         if args.reload_model:
             model.load_state_dict(torch.load('./' + args.save_dir + '.pth', map_location=lambda storage, loc: storage))
 
@@ -189,55 +213,42 @@ def main():
         for data, target in test_loader:
             if args.cuda:
                 data, target = data.cuda(), target.cuda()
-            data, target = Variable(data, volatile=True), Variable(target)
+            data, target = Variable(data, requires_grad=True), Variable(target)
             output = model(data)
+            target_out = convert_to_one_hot(target, num_classes=2)
 
             # Explanation
-            R = output
+            if args.relevance:
+                R = output
+                R_out = model.lrp(R)
+                # R_tot = torch.cat((R_tot, R_out))
+                R_tot = torch.cat((Variable(torch.FloatTensor(R_tot)), R_out.data))
+                data_tot = torch.cat((Variable(torch.FloatTensor(data_tot)), data.data))
 
-            # # model_param2 = model.state_dict().iteritems()
-            # name_list = []
-            # for name in model.named_modules():
-            #     name_list.append(name)
-            #
-            # for name, param in model.state_dict().items():
-            #     param
-            #
-            # for param in reversed(list(model.parameters())):
-            #     param.data.shape
-            #
-            #     activation = model_out[idx].data
-            #     aa = m.parameters().data
-            #
-            # # for aa reversed(model.modules()):
-            # #     aa
-            #
-            #     # print(idx, '->', m)
-            #
-            # for W in reversed(list(model.parameters())):
-            #     R = LRP(W, R, args.relevance_method, 1e-8)
-            #     # print m.name + '::',
-            #     print(W.grad.data.shape)
-            #
-            #     W.grad.data
-            #     W.data
+            # test_loss += F.nll_loss(output, target, size_average=False).item()
+            test_loss += F.binary_cross_entropy_with_logits(output, target_out.cuda(), size_average=False).item()
 
-            # sum up batch loss
-            test_loss += F.nll_loss(output, target, size_average=False).data[0]
             # get the index of the max log-probability
             pred = output.data.max(1, keepdim=True)[1]
-            correct += pred.eq(target.data.view_as(pred)).cpu().sum()
+            correct += pred.eq(target.data.view_as(pred).long()).cpu().sum()
 
         test_loss /= len(test_loader.dataset)
         print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
             test_loss, correct, len(test_loader.dataset),
             100. * correct / len(test_loader.dataset)))
 
+        if args.relevance:
+            plot_relevances_3d(R_tot, data_tot, image_show=True, image_save=True)
+
     for epoch in range(1, args.epochs + 1):
         train(epoch)
 
-        test()
+        test() #매 epoch 마다 테스트 하고싶으면
+
+    # test() #훈련되어 있는 training model에 test만
 
 
 if __name__ == "__main__":
     main()
+
+
