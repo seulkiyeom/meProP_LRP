@@ -47,9 +47,9 @@ def main():
                         help='relevance methods: simple/eps/w^2/alphabeta')
     parser.add_argument('--save-dir', type=str, default='medical_model', metavar='N',
                         help='saved directory')
-    parser.add_argument('--save-model', type=bool, default=True, metavar='N',
+    parser.add_argument('--save-model', type=bool, default=False, metavar='N',
                         help='Save the trained model')
-    parser.add_argument('--reload-model', type=bool, default=False, metavar='N',
+    parser.add_argument('--reload-model', type=bool, default=True, metavar='N',
                         help='Restore the trained model')
     parser.add_argument('--relevance', type=bool, default=True, metavar='N',
                         help='Compute relevances')
@@ -202,8 +202,8 @@ def main():
             torch.save(model.state_dict(), './' + args.save_dir + '.pth')
 
     def test():
-        R_tot = []
-        data_tot = []
+        R_tot = np.array([])
+        data_tot = np.array([])
         if args.reload_model:
             model.load_state_dict(torch.load('./' + args.save_dir + '.pth', map_location=lambda storage, loc: storage))
 
@@ -221,9 +221,8 @@ def main():
             if args.relevance:
                 R = output
                 R_out = model.lrp(R)
-                # R_tot = torch.cat((R_tot, R_out))
-                R_tot = torch.cat((Variable(torch.FloatTensor(R_tot)), R_out.data))
-                data_tot = torch.cat((Variable(torch.FloatTensor(data_tot)), data.data))
+                R_tot = np.vstack([R_tot, R_out.data.numpy()]) if R_tot.size else R_out.data.numpy()
+                data_tot = np.vstack([data_tot, data.data.numpy()]) if data_tot.size else data.data.numpy()
 
             # test_loss += F.nll_loss(output, target, size_average=False).item()
             test_loss += F.binary_cross_entropy_with_logits(output, target_out.cuda(), size_average=False).item()
@@ -240,12 +239,12 @@ def main():
         if args.relevance:
             plot_relevances_3d(R_tot, data_tot, image_show=True, image_save=True)
 
-    for epoch in range(1, args.epochs + 1):
-        train(epoch)
+    # for epoch in range(1, args.epochs + 1):
+    #     train(epoch)
+    #
+    #     test() #매 epoch 마다 테스트 하고싶으면
 
-        test() #매 epoch 마다 테스트 하고싶으면
-
-    # test() #훈련되어 있는 training model에 test만
+    test() #훈련되어 있는 training model에 test만
 
 
 if __name__ == "__main__":

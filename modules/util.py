@@ -69,8 +69,8 @@ def plot_relevances(rel, img, image_show = False, image_save = False):
     visualize(rel, img, image_show, image_save)
 
 def plot_relevances_3d(rel, img, image_show = False, image_save = False):
-    rel = rel.mean(dim=1, keepdim=True)
-    rel = rel.permute(0, 2, 3, 1).data.numpy()
-    img = img.permute(0, 2, 3, 1).data.numpy()
+    rel = rel.mean(axis=1, keepdims=True)
+    rel = rel.transpose(0, 2, 3, 1)
+    img = img.transpose(0, 2, 3, 1)
 
     visualize_3d(rel, img, image_show, image_save)

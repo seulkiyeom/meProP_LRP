@@ -74,12 +74,12 @@ def main():
                                               batch_size=args.test_batch_size,
                                               shuffle=False, **kwargs)
 
-    def printnorm(self, input, output):
-        # input is a tuple of packed inputs
-        # output is a Variable. output.data is the Tensor we are interested
-        # print('Inside ' + self.__class__.__name__ + ' forward')
-        self.input = input[0]
-        self.output = output.data
+    # def printnorm(self, input, output):
+    #     # input is a tuple of packed inputs
+    #     # output is a Variable. output.data is the Tensor we are interested
+    #     # print('Inside ' + self.__class__.__name__ + ' forward')
+    #     self.input = input[0]
+    #     self.output = output.data
 
 
     class Net(nn.Module):
@@ -113,24 +113,26 @@ def main():
             return x
 
 
-        def forward_hook(self):
-            # For Forward Hook
-            global layer_name
-            for name, module in self.layer.named_children():
-                self.hook = module.register_forward_hook(printnorm)
-                layer_name.append(name)
-            for name, module in self.fc_layer.named_children():
-                self.hook = module.register_forward_hook(printnorm)
-                layer_name.append(name)
+        # def forward_hook(self):
+        #     # For Forward Hook
+        #     global layer_name
+        #     for name, module in self.layer.named_children():
+        #         self.hook = module.register_forward_hook(printnorm)
+        #         layer_name.append(name)
+        #     for name, module in self.fc_layer.named_children():
+        #         self.hook = module.register_forward_hook(printnorm)
+        #         layer_name.append(name)
 
 
-        def lrp(self, R):
+        def lrp(self, R, train_param = 'False'):
             for cur_layer in layer_name[::-1]:
                 find = False
                 for name, module in self.fc_layer.named_children():  # 접근 방법
                     if name is cur_layer:
-                        # print(name)
-                        R = module.lrp(R, args.relevance_method, 1e-8)
+                        if train_param:
+                            R = module.lrp(R, args.relevance_method, 1e-8)
+                        else:
+                            R = module.meprop_lrp(R, args.relevance_method, 1e-8)
                         # self.hook.remove()
                         find = True
                     if find:
@@ -138,17 +140,20 @@ def main():
 
                 for name, module in self.layer.named_children():  # 접근 방법
                     if name is cur_layer:
-                        # print(name)
-                        R = module.lrp(R, args.relevance_method, 1e-8)
+                        if train_param:
+                            R = module.lrp(R, args.relevance_method, 1e-8)
+                        else:
+                            R = module.meprop_lrp(R, args.relevance_method, 1e-8)
                         # self.hook.remove()
                         find = True
                     if find:
                         break
 
-            return R
+            if train_param:
+                return R
 
     model = Net()
-    model.forward_hook()
+    # model.forward_hook()
 
     if args.cuda:
         model.cuda()
@@ -168,7 +173,7 @@ def main():
             R = output
             loss = F.nll_loss(output, target)
 
-            # model.lrp(R)
+            model.lrp(R, 'False')
             # Backward Pass
             loss.backward()  # Calculation of Gradient
             # param_model = list(model.parameters()) #to show all W in the model
@@ -208,12 +213,12 @@ def main():
             # Explanation
             if args.relevance:
                 R = output
-                R_out = model.lrp(R)
+                R_out = model.lrp(R, 'True')
                 # R_tot = torch.cat((R_tot, R_out))
                 R_tot = torch.cat((Variable(torch.FloatTensor(R_tot)), R_out.data))
                 data_tot = torch.cat((Variable(torch.FloatTensor(data_tot)), data.data))
 
-            test_loss += F.nll_loss(output, target, size_average=False).item()
+            test_loss += F.nll_loss(output, target, size_average=False).data[0]
             # get the index of the max log-probability
             pred = output.data.max(1, keepdim=True)[1]
             correct += pred.eq(target.data.view_as(pred)).cpu().sum()
